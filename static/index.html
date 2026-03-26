@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SevinHub Live Playground</title>
+
+<style>
+html, body {
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+    font-family: Arial;
+    color: white;
+}
+
+canvas { display: block; }
+
+.hud {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 10;
+}
+
+.panel {
+    background: rgba(0,0,0,0.6);
+    padding: 12px;
+    border-radius: 12px;
+}
+
+.controls {
+    display: flex;
+    gap: 8px;
+}
+
+button {
+    padding: 10px;
+    border-radius: 10px;
+    border: none;
+    background: rgba(255,255,255,0.1);
+    color: white;
+}
+
+.active {
+    outline: 2px solid white;
+}
+
+.status {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    padding: 10px 16px;
+    border-radius: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div class="hud">
+    <div class="panel">
+        <b>SevinHub Live Playground</b><br>
+        Users: <span id="users">1</span><br>
+        Mode: <span id="mode">calm</span><br>
+        Beat: <span id="beatStatus">off</span>
+    </div>
+
+    <div class="controls">
+        <button id="saveBtn">Save</button>
+        <button id="clearBtn">Clear</button>
+        <button id="soundBtn">Sound</button>
+        <button id="beatBtn">Beat</button>
+    </div>
+</div>
+
+<div class="status" id="status">Connecting...</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let w = canvas.width = window.innerWidth;
+let h = canvas.height = window.innerHeight;
+
+window.onresize = () => {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+};
+
+const userId = "u-" + Math.random().toString(36).slice(2);
+const userHue = Math.floor(Math.random() * 360);
+
+const usersEl = document.getElementById("users");
+const modeEl = document.getElementById("mode");
+const statusEl = document.getElementById("status");
+const beatStatusEl = document.getElementById("beatStatus");
+
+let socket;
+
+function wsUrl(){
+    return "ws://" + location.hostname + ":8090/ws";
+}
+
+try {
+    socket = new WebSocket(wsUrl());
+} catch(e){}
+
+if(socket){
+    socket.onopen = ()=> statusEl.textContent = "Connected";
+
+    socket.onmessage = e=>{
+        const msg = JSON.parse(e.data);
+        if(msg.users) usersEl.textContent = msg.users;
+        if(msg.mode) modeEl.textContent = msg.mode;
+
+        if(msg.type==="draw"){
+            spawn(msg.x, msg.y, msg.hue);
+        }
+        if(msg.type==="clear"){
+            particles=[];
+        }
+    };
+
+    socket.onclose = ()=> statusEl.textContent = "Offline mode";
+}
+
+// PARTICLES
+let particles=[];
+
+function spawn(x,y,hue){
+    for(let i=0;i<10;i++){
+        particles.push({
+            x,y,
+            vx:(Math.random()-0.5)*3,
+            vy:(Math.random()-0.5)*3,
+            life:100,
+            hue:hue,
+            size:3
+        });
+    }
+}
+
+function sendDraw(x,y){
+    if(socket && socket.readyState===1){
+        socket.send(JSON.stringify({
+            type:"draw",
+            x,y,
+            hue:userHue
+        }));
+    } else {
+        spawn(x,y,userHue);
+    }
+}
+
+// AUDIO (TOUCH SOUND)
+let audioCtx=null;
+let osc=null;
+
+function startSound(y){
+    if(!audioCtx){
+        audioCtx=new AudioContext();
+    }
+
+    osc=audioCtx.createOscillator();
+    let gain=audioCtx.createGain();
+
+    osc.frequency.value=200+(y/h)*800;
+    gain.gain.value=0.05;
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+}
+
+function stopSound(){
+    if(osc){
+        osc.stop();
+        osc=null;
+    }
+}
+
+// BEAT SYNC
+let analyser, micData, beatEnabled=false, beatLevel=0;
+
+async function enableBeat(){
+    try{
+        const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+        audioCtx=new AudioContext();
+        const source=audioCtx.createMediaStreamSource(stream);
+
+        analyser=audioCtx.createAnalyser();
+        analyser.fftSize=256;
+
+        micData=new Uint8Array(analyser.frequencyBinCount);
+
+        source.connect(analyser);
+
+        beatEnabled=true;
+        beatStatusEl.textContent="on";
+    }catch(e){
+        alert("Mic denied");
+    }
+}
+
+// LOOP
+function loop(){
+    ctx.fillStyle="rgba(0,0,0,0.2)";
+    ctx.fillRect(0,0,w,h);
+
+    if(beatEnabled){
+        analyser.getByteFrequencyData(micData);
+        let sum=0;
+        for(let i=0;i<micData.length;i++) sum+=micData[i];
+        beatLevel=sum/micData.length/255;
+    }
+
+    particles=particles.filter(p=>p.life>0);
+
+    particles.forEach(p=>{
+        p.x+=p.vx;
+        p.y+=p.vy;
+        p.life--;
+
+        if(beatEnabled){
+            p.size=3+beatLevel*10;
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fillStyle=`hsl(${p.hue},100%,60%)`;
+        ctx.fill();
+    });
+
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+// INPUT
+canvas.onmousedown=e=>{
+    sendDraw(e.clientX,e.clientY);
+    startSound(e.clientY);
+};
+
+canvas.onmousemove=e=>{
+    if(e.buttons){
+        sendDraw(e.clientX,e.clientY);
+    }
+};
+
+canvas.onmouseup=stopSound;
+
+canvas.ontouchstart=e=>{
+    let t=e.touches[0];
+    sendDraw(t.clientX,t.clientY);
+    startSound(t.clientY);
+};
+
+canvas.ontouchmove=e=>{
+    let t=e.touches[0];
+    sendDraw(t.clientX,t.clientY);
+};
+
+canvas.ontouchend=stopSound;
+
+// BUTTONS
+document.getElementById("clearBtn").onclick=()=>{
+    if(socket && socket.readyState===1){
+        socket.send(JSON.stringify({type:"clear"}));
+    }
+    particles=[];
+};
+
+document.getElementById("saveBtn").onclick=()=>{
+    let a=document.createElement("a");
+    a.href=canvas.toDataURL();
+    a.download="art.png";
+    a.click();
+};
+
+document.getElementById("soundBtn").onclick=()=>{
+    alert("Touch canvas to play sound 🎧");
+};
+
+document.getElementById("beatBtn").onclick=enableBeat;
+</script>
+
+</body>
+</html>
