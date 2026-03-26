@@ -1,298 +1,662 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SevinHub Live Playground</title>
-
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SevinHub Live Playground V2</title>
 <style>
-html, body {
-    margin: 0;
-    overflow: hidden;
-    background: #000;
-    font-family: Arial;
-    color: white;
-}
+    * { box-sizing: border-box; }
 
-canvas { display: block; }
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: radial-gradient(circle at center, #0b0b0b 0%, #030303 55%, #000 100%);
+        font-family: Arial, sans-serif;
+        color: white;
+    }
 
-.hud {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    display: flex;
-    justify-content: space-between;
-    z-index: 10;
-}
+    #canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        touch-action: none;
+    }
 
-.panel {
-    background: rgba(0,0,0,0.6);
-    padding: 12px;
-    border-radius: 12px;
-}
+    .hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 20;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        pointer-events: auto;
+    }
 
-.controls {
-    display: flex;
-    gap: 8px;
-}
+    .panel, .status, .log-panel {
+        background: rgba(8, 8, 8, 0.65);
+        border: 1px solid rgba(255,255,255,0.1);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
 
-button {
-    padding: 10px;
-    border-radius: 10px;
-    border: none;
-    background: rgba(255,255,255,0.1);
-    color: white;
-}
+    .panel {
+        border-radius: 18px;
+        padding: 14px 16px;
+        min-width: 180px;
+    }
 
-.active {
-    outline: 2px solid white;
-}
+    .title {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
 
-.status {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0,0,0,0.6);
-    padding: 10px 16px;
-    border-radius: 20px;
-}
+    .meta {
+        font-size: 12px;
+        line-height: 1.55;
+        opacity: 0.95;
+    }
+
+    .controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        max-width: 68%;
+    }
+
+    button {
+        appearance: none;
+        border: none;
+        border-radius: 14px;
+        padding: 11px 14px;
+        background: rgba(255,255,255,0.1);
+        color: white;
+        font-size: 13px;
+        cursor: pointer;
+        min-width: 84px;
+    }
+
+    button:active {
+        transform: scale(0.98);
+    }
+
+    button.active {
+        outline: 2px solid rgba(255,255,255,0.35);
+        background: rgba(255,255,255,0.18);
+    }
+
+    .status-wrap {
+        position: fixed;
+        bottom: 14px;
+        left: 12px;
+        right: 12px;
+        z-index: 20;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+    }
+
+    .status {
+        border-radius: 999px;
+        padding: 10px 16px;
+        font-size: 13px;
+        pointer-events: auto;
+    }
+
+    .log-panel {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 62px;
+        z-index: 20;
+        border-radius: 16px;
+        max-height: 120px;
+        overflow: auto;
+        padding: 10px 12px;
+        font-size: 12px;
+    }
+
+    .log-title {
+        font-weight: 700;
+        margin-bottom: 6px;
+        opacity: 0.95;
+    }
+
+    .log-line {
+        opacity: 0.9;
+        margin-bottom: 4px;
+        word-break: break-word;
+    }
+
+    .hidden {
+        display: none;
+    }
+
+    @media (max-width: 720px) {
+        .hud {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .controls {
+            max-width: 100%;
+            justify-content: flex-start;
+        }
+
+        .panel {
+            width: fit-content;
+            max-width: 100%;
+        }
+
+        button {
+            min-width: 76px;
+        }
+    }
 </style>
 </head>
-
 <body>
-
 <canvas id="canvas"></canvas>
 
 <div class="hud">
     <div class="panel">
-        <b>SevinHub Live Playground</b><br>
-        Users: <span id="users">1</span><br>
-        Mode: <span id="mode">calm</span><br>
-        Beat: <span id="beatStatus">off</span>
+        <div class="title">SevinHub Live Playground</div>
+        <div class="meta">
+            Room: <span id="roomName">main</span><br>
+            User: <span id="userName">anon</span><br>
+            Users: <span id="usersCount">1</span><br>
+            AI Mode: <span id="modeLabel">calm</span><br>
+            Beat Sync: <span id="beatLabel">off</span>
+        </div>
     </div>
 
     <div class="controls">
-        <button id="saveBtn">Save</button>
-        <button id="clearBtn">Clear</button>
-        <button id="soundBtn">Sound</button>
-        <button id="beatBtn">Beat</button>
+        <button id="btnSave">Save PNG</button>
+        <button id="btnClear">Clear</button>
+        <button id="btnBeat">Beat Sync</button>
+        <button id="btnSound">Sound On Touch</button>
+        <button id="btnLogs">Logs</button>
     </div>
 </div>
 
-<div class="status" id="status">Connecting...</div>
+<div class="log-panel" id="logPanel">
+    <div class="log-title">Live Event Log</div>
+    <div id="logBody"></div>
+</div>
+
+<div class="status-wrap">
+    <div class="status" id="status">Connecting...</div>
+</div>
 
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
+const roomNameEl = document.getElementById("roomName");
+const userNameEl = document.getElementById("userName");
+const usersCountEl = document.getElementById("usersCount");
+const modeLabelEl = document.getElementById("modeLabel");
+const beatLabelEl = document.getElementById("beatLabel");
+const statusEl = document.getElementById("status");
+const logPanelEl = document.getElementById("logPanel");
+const logBodyEl = document.getElementById("logBody");
+
+const btnSave = document.getElementById("btnSave");
+const btnClear = document.getElementById("btnClear");
+const btnBeat = document.getElementById("btnBeat");
+const btnSound = document.getElementById("btnSound");
+const btnLogs = document.getElementById("btnLogs");
+
 let w = canvas.width = window.innerWidth;
 let h = canvas.height = window.innerHeight;
-
-window.onresize = () => {
+window.addEventListener("resize", () => {
     w = canvas.width = window.innerWidth;
     h = canvas.height = window.innerHeight;
-};
+});
 
-const userId = "u-" + Math.random().toString(36).slice(2);
+const params = new URLSearchParams(location.search);
+const room = (params.get("room") || "main").trim() || "main";
+
+let username = (params.get("user") || "").trim();
+if (!username) {
+    username = window.prompt("Your name") || "anon";
+}
+username = username.trim() || "anon";
+
+roomNameEl.textContent = room;
+userNameEl.textContent = username;
+
+const userId = "u-" + Math.random().toString(36).slice(2, 9);
 const userHue = Math.floor(Math.random() * 360);
 
-const usersEl = document.getElementById("users");
-const modeEl = document.getElementById("mode");
-const statusEl = document.getElementById("status");
-const beatStatusEl = document.getElementById("beatStatus");
+let particles = [];
+let pointerDown = false;
+let lastX = 0;
+let lastY = 0;
 
-let socket;
+let socket = null;
+let connected = false;
+let logsVisible = true;
 
-function wsUrl(){
-    return "ws://" + location.hostname + ":8090/ws";
+let soundEnabled = false;
+let beatEnabled = false;
+let beatLevel = 0;
+
+let audioCtx = null;
+let osc = null;
+let touchGain = null;
+
+let analyser = null;
+let micSource = null;
+let micData = null;
+
+function addLog(text) {
+    const line = document.createElement("div");
+    line.className = "log-line";
+    line.textContent = text;
+    logBodyEl.prepend(line);
+
+    while (logBodyEl.children.length > 25) {
+        logBodyEl.removeChild(logBodyEl.lastChild);
+    }
 }
 
-try {
-    socket = new WebSocket(wsUrl());
-} catch(e){}
+function wsUrl() {
+    const protocol = location.protocol === "https:" ? "wss://" : "ws://";
+    return `${protocol}${location.host}/ws`;
+}
 
-if(socket){
-    socket.onopen = ()=> statusEl.textContent = "Connected";
+function connectSocket() {
+    try {
+        socket = new WebSocket(wsUrl());
+    } catch (err) {
+        socket = null;
+        connected = false;
+        statusEl.textContent = "Offline solo mode";
+        addLog("WebSocket init failed, using solo mode");
+        return;
+    }
 
-    socket.onmessage = e=>{
-        const msg = JSON.parse(e.data);
-        if(msg.users) usersEl.textContent = msg.users;
-        if(msg.mode) modeEl.textContent = msg.mode;
+    socket.onopen = () => {
+        connected = true;
+        statusEl.textContent = "Connected live";
+        addLog(`Connected to room "${room}" as ${username}`);
 
-        if(msg.type==="draw"){
-            spawn(msg.x, msg.y, msg.hue);
+        socket.send(JSON.stringify({
+            type: "join",
+            room,
+            username,
+            hue: userHue
+        }));
+
+        setInterval(() => {
+            if (socket && socket.readyState === 1) {
+                socket.send(JSON.stringify({ type: "ping" }));
+            }
+        }, 5000);
+    };
+
+    socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "welcome") {
+            usersCountEl.textContent = msg.users ?? "1";
+            modeLabelEl.textContent = msg.mode ?? "calm";
         }
-        if(msg.type==="clear"){
-            particles=[];
+
+        if (msg.type === "system" || msg.type === "pong") {
+            if (typeof msg.users !== "undefined") {
+                usersCountEl.textContent = msg.users;
+            }
+            if (msg.mode) {
+                modeLabelEl.textContent = msg.mode;
+            }
+            if (msg.message) {
+                addLog(msg.message);
+            }
+        }
+
+        if (msg.type === "draw") {
+            spawnBurst(
+                Number(msg.x) || 0,
+                Number(msg.y) || 0,
+                Number(msg.vx) || 0,
+                Number(msg.vy) || 0,
+                msg.mode || "calm",
+                Number(msg.strength) || 1,
+                Number(msg.hue) || 180
+            );
+        }
+
+        if (msg.type === "clear") {
+            particles = [];
+            ctx.clearRect(0, 0, w, h);
+            addLog((msg.by ? msg.by + " " : "") + "cleared the canvas");
         }
     };
 
-    socket.onclose = ()=> statusEl.textContent = "Offline mode";
+    socket.onclose = () => {
+        connected = false;
+        statusEl.textContent = "Offline solo mode";
+        addLog("Connection closed, using solo mode");
+    };
+
+    socket.onerror = () => {
+        connected = false;
+        statusEl.textContent = "Offline solo mode";
+    };
 }
 
-// PARTICLES
-let particles=[];
+class Particle {
+    constructor(x, y, vx, vy, mode, energy, hue) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx + (Math.random() - 0.5) * 2.2;
+        this.vy = vy + (Math.random() - 0.5) * 2.2;
+        this.life = 75 + Math.random() * 70;
+        this.maxLife = this.life;
+        this.size = 1.6 + Math.random() * 4 * Math.max(0.8, energy);
+        this.mode = mode;
+        this.energy = energy;
+        this.hue = hue;
+        this.angle = Math.random() * Math.PI * 2;
+    }
 
-function spawn(x,y,hue){
-    for(let i=0;i<10;i++){
-        particles.push({
-            x,y,
-            vx:(Math.random()-0.5)*3,
-            vy:(Math.random()-0.5)*3,
-            life:100,
-            hue:hue,
-            size:3
-        });
+    update() {
+        if (this.mode === "storm") {
+            this.vx *= 1.02;
+            this.vy *= 1.02;
+            this.vx += Math.sin(this.angle) * 0.05;
+            this.vy += Math.cos(this.angle) * 0.05;
+        } else if (this.mode === "flow") {
+            this.vx += Math.sin(this.angle + this.life * 0.03) * 0.018;
+            this.vy += Math.cos(this.angle + this.life * 0.03) * 0.018;
+        } else {
+            this.vx *= 0.995;
+            this.vy *= 0.995;
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= 1;
+
+        if (beatEnabled && beatLevel > 0.12) {
+            this.size += beatLevel * 0.25;
+        } else {
+            this.size *= 0.992;
+        }
+    }
+
+    draw() {
+        const alpha = Math.max(0, this.life / this.maxLife);
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, Math.max(0.8, this.size), 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.hue}, 100%, 60%, ${alpha})`;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = `hsla(${this.hue}, 100%, 60%, ${alpha})`;
+        ctx.fill();
     }
 }
 
-function sendDraw(x,y){
-    if(socket && socket.readyState===1){
-        socket.send(JSON.stringify({
-            type:"draw",
-            x,y,
-            hue:userHue
-        }));
+function spawnBurst(x, y, vx = 0, vy = 0, mode = "calm", strength = 1, hue = 180) {
+    const count = mode === "storm" ? 18 : mode === "flow" ? 12 : 8;
+    for (let i = 0; i < count; i++) {
+        particles.push(new Particle(x, y, vx, vy, mode, strength, hue));
+    }
+}
+
+function drawBackgroundPulse() {
+    const gradient = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.6);
+    const pulse = beatEnabled ? Math.min(0.18 + beatLevel * 0.6, 0.7) : 0.15;
+    gradient.addColorStop(0, `rgba(255,255,255,${pulse * 0.08})`);
+    gradient.addColorStop(1, `rgba(0,0,0,0)`);
+
+    ctx.fillStyle = "rgba(0,0,0,0.16)";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+}
+
+function animate() {
+    drawBackgroundPulse();
+
+    if (beatEnabled && analyser && micData) {
+        analyser.getByteFrequencyData(micData);
+        let sum = 0;
+        for (let i = 0; i < micData.length; i++) sum += micData[i];
+        beatLevel = (sum / micData.length) / 255;
     } else {
-        spawn(x,y,userHue);
+        beatLevel *= 0.9;
+    }
+
+    particles = particles.filter(p =>
+        p.life > 0 &&
+        p.x > -120 && p.x < w + 120 &&
+        p.y > -120 && p.y < h + 120
+    );
+
+    for (const p of particles) {
+        p.update();
+        p.draw();
+    }
+
+    requestAnimationFrame(animate);
+}
+animate();
+
+function ensureAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
 }
 
-// AUDIO (TOUCH SOUND)
-let audioCtx=null;
-let osc=null;
-
-function startSound(y){
-    if(!audioCtx){
-        audioCtx=new AudioContext();
+async function resumeAudio() {
+    ensureAudio();
+    if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
     }
+}
 
-    osc=audioCtx.createOscillator();
-    let gain=audioCtx.createGain();
+function startTouchSound(y) {
+    if (!soundEnabled) return;
 
-    osc.frequency.value=200+(y/h)*800;
-    gain.gain.value=0.05;
+    ensureAudio();
 
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    if (osc) return;
 
+    osc = audioCtx.createOscillator();
+    touchGain = audioCtx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.value = 180 + ((h - y) / h) * 700;
+    touchGain.gain.value = 0.05;
+
+    osc.connect(touchGain);
+    touchGain.connect(audioCtx.destination);
     osc.start();
 }
 
-function stopSound(){
-    if(osc){
-        osc.stop();
-        osc=null;
+function updateTouchSound(y) {
+    if (!osc || !audioCtx) return;
+    const freq = 180 + ((h - y) / h) * 700;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+}
+
+function stopTouchSound() {
+    if (osc) {
+        try { osc.stop(); } catch (e) {}
+        try { osc.disconnect(); } catch (e) {}
+        osc = null;
+    }
+    if (touchGain) {
+        try { touchGain.disconnect(); } catch (e) {}
+        touchGain = null;
     }
 }
 
-// BEAT SYNC
-let analyser, micData, beatEnabled=false, beatLevel=0;
+async function enableBeatSync() {
+    try {
+        await resumeAudio();
 
-async function enableBeat(){
-    try{
-        const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-        audioCtx=new AudioContext();
-        const source=audioCtx.createMediaStreamSource(stream);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micSource = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        micData = new Uint8Array(analyser.frequencyBinCount);
+        micSource.connect(analyser);
 
-        analyser=audioCtx.createAnalyser();
-        analyser.fftSize=256;
-
-        micData=new Uint8Array(analyser.frequencyBinCount);
-
-        source.connect(analyser);
-
-        beatEnabled=true;
-        beatStatusEl.textContent="on";
-    }catch(e){
-        alert("Mic denied");
+        beatEnabled = true;
+        btnBeat.classList.add("active");
+        beatLabelEl.textContent = "on";
+        statusEl.textContent = "Beat sync enabled";
+        addLog("Beat sync enabled");
+    } catch (err) {
+        beatEnabled = false;
+        btnBeat.classList.remove("active");
+        beatLabelEl.textContent = "off";
+        statusEl.textContent = "Mic access denied";
+        addLog("Beat sync failed: mic access denied");
     }
 }
 
-// LOOP
-function loop(){
-    ctx.fillStyle="rgba(0,0,0,0.2)";
-    ctx.fillRect(0,0,w,h);
-
-    if(beatEnabled){
-        analyser.getByteFrequencyData(micData);
-        let sum=0;
-        for(let i=0;i<micData.length;i++) sum+=micData[i];
-        beatLevel=sum/micData.length/255;
-    }
-
-    particles=particles.filter(p=>p.life>0);
-
-    particles.forEach(p=>{
-        p.x+=p.vx;
-        p.y+=p.vy;
-        p.life--;
-
-        if(beatEnabled){
-            p.size=3+beatLevel*10;
-        }
-
-        ctx.beginPath();
-        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
-        ctx.fillStyle=`hsl(${p.hue},100%,60%)`;
-        ctx.fill();
-    });
-
-    requestAnimationFrame(loop);
+function disableBeatSync() {
+    beatEnabled = false;
+    analyser = null;
+    micData = null;
+    micSource = null;
+    beatLabelEl.textContent = "off";
+    btnBeat.classList.remove("active");
+    statusEl.textContent = connected ? "Connected live" : "Offline solo mode";
+    addLog("Beat sync disabled");
 }
 
-loop();
-
-// INPUT
-canvas.onmousedown=e=>{
-    sendDraw(e.clientX,e.clientY);
-    startSound(e.clientY);
-};
-
-canvas.onmousemove=e=>{
-    if(e.buttons){
-        sendDraw(e.clientX,e.clientY);
+function sendDraw(x, y, vx, vy, strength = 1) {
+    if (socket && socket.readyState === 1) {
+        socket.send(JSON.stringify({
+            type: "draw",
+            x,
+            y,
+            vx,
+            vy,
+            strength,
+            hue: userHue,
+            userId
+        }));
+    } else {
+        spawnBurst(x, y, vx, vy, "calm", strength, userHue);
     }
-};
+}
 
-canvas.onmouseup=stopSound;
+async function handlePointerStart(x, y) {
+    pointerDown = true;
+    lastX = x;
+    lastY = y;
+    sendDraw(x, y, 0, 0, 1);
+    await resumeAudio();
+    startTouchSound(y);
+}
 
-canvas.ontouchstart=e=>{
-    let t=e.touches[0];
-    sendDraw(t.clientX,t.clientY);
-    startSound(t.clientY);
-};
+function handlePointerMove(x, y) {
+    if (!pointerDown) return;
 
-canvas.ontouchmove=e=>{
-    let t=e.touches[0];
-    sendDraw(t.clientX,t.clientY);
-};
+    const vx = (x - lastX) * 0.15;
+    const vy = (y - lastY) * 0.15;
+    const speed = Math.min(2.5, Math.hypot(vx, vy) / 3 + 0.8);
 
-canvas.ontouchend=stopSound;
+    sendDraw(x, y, vx, vy, speed);
+    updateTouchSound(y);
 
-// BUTTONS
-document.getElementById("clearBtn").onclick=()=>{
-    if(socket && socket.readyState===1){
-        socket.send(JSON.stringify({type:"clear"}));
+    lastX = x;
+    lastY = y;
+}
+
+function handlePointerEnd() {
+    pointerDown = false;
+    stopTouchSound();
+}
+
+canvas.addEventListener("mousedown", async (e) => {
+    await handlePointerStart(e.clientX, e.clientY);
+});
+canvas.addEventListener("mousemove", (e) => {
+    handlePointerMove(e.clientX, e.clientY);
+});
+window.addEventListener("mouseup", handlePointerEnd);
+
+canvas.addEventListener("touchstart", async (e) => {
+    const t = e.touches[0];
+    if (!t) return;
+    await handlePointerStart(t.clientX, t.clientY);
+}, { passive: false });
+
+canvas.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    if (!t) return;
+    handlePointerMove(t.clientX, t.clientY);
+    e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener("touchend", handlePointerEnd);
+canvas.addEventListener("touchcancel", handlePointerEnd);
+
+btnClear.addEventListener("click", () => {
+    if (socket && socket.readyState === 1) {
+        socket.send(JSON.stringify({ type: "clear" }));
+    } else {
+        particles = [];
+        ctx.clearRect(0, 0, w, h);
+        addLog("Local canvas cleared");
     }
-    particles=[];
-};
+});
 
-document.getElementById("saveBtn").onclick=()=>{
-    let a=document.createElement("a");
-    a.href=canvas.toDataURL();
-    a.download="art.png";
-    a.click();
-};
+btnSave.addEventListener("click", () => {
+    const link = document.createElement("a");
+    link.download = "sevinhub-live-artwork.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+    statusEl.textContent = "PNG saved";
+    addLog("Artwork saved as PNG");
+});
 
-document.getElementById("soundBtn").onclick=()=>{
-    alert("Touch canvas to play sound 🎧");
-};
+btnSound.addEventListener("click", async () => {
+    soundEnabled = !soundEnabled;
 
-document.getElementById("beatBtn").onclick=enableBeat;
+    if (soundEnabled) {
+        await resumeAudio();
+        btnSound.classList.add("active");
+        statusEl.textContent = "Touch sound enabled";
+        addLog("Touch sound enabled");
+    } else {
+        stopTouchSound();
+        btnSound.classList.remove("active");
+        statusEl.textContent = connected ? "Connected live" : "Offline solo mode";
+        addLog("Touch sound disabled");
+    }
+});
+
+btnBeat.addEventListener("click", async () => {
+    if (!beatEnabled) {
+        await enableBeatSync();
+    } else {
+        disableBeatSync();
+    }
+});
+
+btnLogs.addEventListener("click", () => {
+    logsVisible = !logsVisible;
+    logPanelEl.classList.toggle("hidden", !logsVisible);
+    btnLogs.classList.toggle("active", logsVisible);
+});
+
+btnLogs.classList.add("active");
+connectSocket();
 </script>
-
 </body>
 </html>
