@@ -4,8 +4,23 @@ from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 import json
 import os
+import re
+import time
 
-app = FastAPI(title="SevinHub Live Playground V2")
+app = FastAPI(
+    title="SevinHub Live Playground V2",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+MAX_USERNAME_LENGTH = 30
+MAX_ROOM_LENGTH = 30
+MAX_DRAW_COORD = 10000
+MAX_DRAW_VELOCITY = 100
+MAX_DRAW_STRENGTH = 10
+RATE_LIMIT_MESSAGES = 30
+RATE_LIMIT_WINDOW = 1.0
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -23,6 +38,11 @@ if not os.path.exists(LOG_FILE):
         pass
 
 
+def sanitize_log_value(value: str) -> str:
+    """Remove control characters and limit length to prevent log injection."""
+    return re.sub(r"[\x00-\x1f\x7f]", "", value)[:100]
+
+
 def log_event(message: str) -> None:
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -35,6 +55,7 @@ class RoomManager:
         self.clients: dict[WebSocket, dict] = {}
         self.room_modes: dict[str, str] = {}
         self.room_activity: dict[str, int] = {}
+        self.client_rate: dict[WebSocket, list[float]] = {}
 
     async def connect(self, websocket: WebSocket, room: str, username: str, hue: int):
         if room not in self.rooms:
@@ -50,6 +71,7 @@ class RoomManager:
             "username": username,
             "hue": hue,
         }
+        self.client_rate[websocket] = []
 
     def disconnect(self, websocket: WebSocket):
         client = self.clients.get(websocket)
@@ -61,6 +83,7 @@ class RoomManager:
             self.rooms[room].remove(websocket)
 
         del self.clients[websocket]
+        self.client_rate.pop(websocket, None)
 
         if room in self.rooms and not self.rooms[room]:
             del self.rooms[room]
@@ -87,6 +110,19 @@ class RoomManager:
 
         self.room_modes[room] = mode
         return mode
+
+    def check_rate_limit(self, websocket: WebSocket) -> bool:
+        """Return True if the client is within the rate limit, False otherwise."""
+        now = time.monotonic()
+        timestamps = self.client_rate.get(websocket, [])
+        cutoff = now - RATE_LIMIT_WINDOW
+        timestamps = [t for t in timestamps if t > cutoff]
+        if len(timestamps) >= RATE_LIMIT_MESSAGES:
+            self.client_rate[websocket] = timestamps
+            return False
+        timestamps.append(now)
+        self.client_rate[websocket] = timestamps
+        return True
 
     async def send_json(self, websocket: WebSocket, message: dict):
         await websocket.send_text(json.dumps(message))
@@ -136,16 +172,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 room = str(payload.get("room", "main")).strip() or "main"
+                room = room[:MAX_ROOM_LENGTH]
                 username = str(payload.get("username", "anon")).strip() or "anon"
+                username = username[:MAX_USERNAME_LENGTH]
                 try:
-                    hue = int(payload.get("hue", 180))
+                    hue = max(0, min(360, int(payload.get("hue", 180))))
                 except Exception:
                     hue = 180
 
                 await manager.connect(websocket, room, username, hue)
                 joined = True
 
-                log_event(f"[JOIN] user={username} room={room} hue={hue}")
+                safe_user = sanitize_log_value(username)
+                safe_room = sanitize_log_value(room)
+                log_event(f"[JOIN] user={safe_user} room={safe_room} hue={hue}")
                 await manager.send_json(websocket, {
                     "type": "welcome",
                     "room": room,
@@ -159,16 +199,35 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not joined:
                     continue
 
+                if not manager.check_rate_limit(websocket):
+                    continue
+
+                def clamp_float(val, default, lo, hi):
+                    try:
+                        v = float(val)
+                        if v != v:  # NaN check
+                            return default
+                        return max(lo, min(hi, v))
+                    except (TypeError, ValueError):
+                        return default
+
+                draw_x = clamp_float(payload.get("x"), 0, -MAX_DRAW_COORD, MAX_DRAW_COORD)
+                draw_y = clamp_float(payload.get("y"), 0, -MAX_DRAW_COORD, MAX_DRAW_COORD)
+                draw_vx = clamp_float(payload.get("vx", 0), 0, -MAX_DRAW_VELOCITY, MAX_DRAW_VELOCITY)
+                draw_vy = clamp_float(payload.get("vy", 0), 0, -MAX_DRAW_VELOCITY, MAX_DRAW_VELOCITY)
+                draw_strength = clamp_float(payload.get("strength", 1), 1, 0, MAX_DRAW_STRENGTH)
+                draw_hue = clamp_float(payload.get("hue", hue), hue, 0, 360)
+
                 mode = manager.update_room_mode(room, increment=3)
 
                 await manager.broadcast(room, {
                     "type": "draw",
-                    "x": payload.get("x"),
-                    "y": payload.get("y"),
-                    "vx": payload.get("vx", 0),
-                    "vy": payload.get("vy", 0),
-                    "strength": payload.get("strength", 1),
-                    "hue": payload.get("hue", hue),
+                    "x": draw_x,
+                    "y": draw_y,
+                    "vx": draw_vx,
+                    "vy": draw_vy,
+                    "strength": draw_strength,
+                    "hue": draw_hue,
                     "username": username,
                     "mode": mode,
                 })
@@ -177,7 +236,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not joined:
                     continue
 
-                log_event(f"[CLEAR] user={username} room={room}")
+                safe_user = sanitize_log_value(username)
+                safe_room = sanitize_log_value(room)
+                log_event(f"[CLEAR] user={safe_user} room={safe_room}")
                 await manager.broadcast(room, {
                     "type": "clear",
                     "by": username,
@@ -199,14 +260,14 @@ async def websocket_endpoint(websocket: WebSocket):
             old_room = room
             old_username = username
             manager.disconnect(websocket)
-            log_event(f"[LEAVE] user={old_username} room={old_room}")
+            log_event(f"[LEAVE] user={sanitize_log_value(old_username)} room={sanitize_log_value(old_room)}")
             await manager.broadcast_system(old_room, f"{old_username} left")
     except Exception as exc:
         if joined:
             old_room = room
             old_username = username
             manager.disconnect(websocket)
-            log_event(f"[ERROR] user={old_username} room={old_room} error={repr(exc)}")
+            log_event(f"[ERROR] user={sanitize_log_value(old_username)} room={sanitize_log_value(old_room)} error={repr(exc)}")
             await manager.broadcast_system(old_room, f"{old_username} disconnected")
         try:
             await websocket.close()
